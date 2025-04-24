@@ -1,0 +1,1008 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-lang="th">เครื่องคำนวณเวลาการผลิต TSPT1</title>
+    <title data-lang="en" class="hidden">TSPT1 Production Time Calculator</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .lang-th, .lang-en { display: none; }
+        .lang-th.active, .lang-en.active { display: inline; }
+        .lang-block-th, .lang-block-en { display: none; }
+        .lang-block-th.active, .lang-block-en.active { display: block; }
+        .lang-btn.active-lang { font-weight: bold; background-color: #e5e7eb; }
+        #status { font-weight: bold; margin-bottom: 10px; }
+        .hidden { display: none; }
+        .checkbox-group { margin-top: 5px; }
+        #errorMessage { color: red; margin-top: 10px; }
+        #footer { position: fixed; bottom: 10px; right: 10px; color: #ccc; font-size: 12px; }
+        #jobList { margin-bottom: 20px; }
+        .job-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #ddd; }
+        .job-item button { margin-left: 10px; }
+        input:invalid { border-color: red; }
+    </style>
+</head>
+<body class="bg-gray-100 p-4">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex justify-between mb-4">
+            <h1 class="text-2xl font-bold">
+                <span class="lang-th active">เครื่องคำนวณเวลาการผลิต TSPT1</span>
+                <span class="lang-en">TSPT1 Production Time Calculator</span>
+            </h1>
+            <div>
+                <button id="lang-th" class="lang-btn active-lang px-2 py-1 border rounded">TH</button>
+                <button id="lang-en" class="lang-btn px-2 py-1 border rounded">EN</button>
+            </div>
+        </div>
+
+        <!-- Job List -->
+        <div class="bg-white p-6 rounded shadow-md mb-6">
+            <h2 class="text-xl font-bold mb-4">
+                <span class="lang-th active">รายการงาน</span>
+                <span class="lang-en">Job List</span>
+            </h2>
+            <div id="jobList"></div>
+            <button id="addJobBtn" class="bg-green-500 text-white p-2 rounded w-full mt-4">
+                <span class="lang-th active">เพิ่มงานใหม่</span>
+                <span class="lang-en">Add New Job</span>
+            </button>
+        </div>
+
+        <!-- Input Form -->
+        <div class="bg-white p-6 rounded shadow-md mb-6" id="inputForm">
+            <div id="status" class="text-gray-700">
+                <span class="lang-th active">พร้อมคำนวณ</span>
+                <span class="lang-en">Ready to calculate</span>
+            </div>
+            <div id="errorMessage" class="hidden"></div>
+            <div class="mb-4">
+                <label class="mr-2">
+                    <span class="lang-th active">อยากรู้เรื่องอะไร?</span>
+                    <span class="lang-en">What do you want to find?</span>
+                </label>
+                <select id="calcMode" class="p-2 border rounded">
+                    <option value="time" data-lang="th">เวลาที่เสร็จ</option>
+                    <option value="time" data-lang="en" class="hidden">Completion Time</option>
+                    <option value="output" data-lang="th">จำนวนชิ้นที่ทำได้</option>
+                    <option value="output" data-lang="en" class="hidden">How Many Pieces</option>
+                </select>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block">
+                        <span class="lang-th active">เวลาเริ่ม</span>
+                        <span class="lang-en">Start Time</span>
+                    </label>
+                    <input type="datetime-local" id="startTime" class="w-full p-2 border rounded" required>
+                </div>
+                <div id="targetOutputDiv">
+                    <label class="block">
+                        <span class="lang-th active">จำนวนชิ้นที่ต้องการ</span>
+                        <span class="lang-en">Target Pieces</span>
+                    </label>
+                    <input type="number" id="targetOutput" class="w-full p-2 border rounded" min="1" step="1">
+                </div>
+                <div id="fixedTimeDiv" class="hidden">
+                    <label class="block">
+                        <span class="lang-th active">เวลาที่ต้องเสร็จ</span>
+                        <span class="lang-en">Finish Time</span>
+                    </label>
+                    <input type="datetime-local" id="fixedTime" class="w-full p-2 border rounded">
+                </div>
+                <div>
+                    <label id="rateLabel" class="block">
+                        <span class="lang-th active">เวลาไซเคิล (วินาที/ชิ้น)</span>
+                        <span class="lang-en">Cycle Time (sec/piece)</span>
+                    </label>
+                    <select id="rateType" class="p-2 border rounded mb-2">
+                        <option value="cycleTime" data-lang="th">เวลาไซเคิล (วินาที/ชิ้น)</option>
+                        <option value="cycleTime" data-lang="en" class="hidden">Cycle Time (sec/piece)</option>
+                        <option value="piecesPerHour" data-lang="th">ชิ้นต่อชั่วโมง</option>
+                        <option value="piecesPerHour" data-lang="en" class="hidden">Pieces per Hour</option>
+                    </select>
+                    <input type="number" id="cycleTime" class="w-full p-2 border rounded" min="0.1" step="0.1" required>
+                </div>
+                <div>
+                    <label class="block">
+                        <span class="lang-th active">เวลาเตรียม (นาที)</span>
+                        <span class="lang-en">Setup Time (min)</span>
+                    </label>
+                    <input type="number" id="setupTime" class="w-full p-2 border rounded" min="0" step="0.1" value="0">
+                </div>
+                <div>
+                    <label class="block">
+                        <span class="lang-th active">เวลาพัก</span>
+                        <span class="lang-en">Break Times</span>
+                    </label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="breakTime" value="10:00-10:10"> 10:00 - 10:10 (10 min)</label><br>
+                        <label><input type="checkbox" name="breakTime" value="12:00-12:50"> 12:00 - 12:50 (50 min)</label><br>
+                        <label><input type="checkbox" name="breakTime" value="15:00-15:10"> 15:00 - 15:10 (10 min)</label><br>
+                        <label><input type="checkbox" name="breakTime" value="17:00-17:30"> 17:00 - 17:30 (30 min)</label><br>
+                        <label><input type="checkbox" name="breakTime" value="22:00-22:10"> 22:00 - 22:10 (10 min)</label><br>
+                        <label><input type="checkbox" name="breakTime" value="00:00-01:00"> 00:00 - 01:00 (60 min)</label><br>
+                        <label><input type="checkbox" name="breakTime" value="03:00-03:10"> 03:00 - 03:10 (10 min)</label><br>
+                        <label><input type="checkbox" name="breakTime" value="05:00-05:10"> 05:00 - 05:10 (10 min)</label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block">
+                        <span class="lang-th active">ชื่อชิ้นงาน</span>
+                        <span class="lang-en">Part Name</span>
+                    </label>
+                    <input type="text" id="partName" class="w-full p-2 border rounded" placeholder="e.g., Flap">
+                </div>
+                <div>
+                    <label class="block">
+                        <span class="lang-th active">ของเสียตอนเริ่ม</span>
+                        <span class="lang-en">Start Defect</span>
+                    </label>
+                    <select id="startupDefectUnit" class="p-2 border rounded mb-2">
+                        <option value="percent" data-lang="th">%</option>
+                        <option value="percent" data-lang="en" class="hidden">%</option>
+                        <option value="pieces" data-lang="th">ชิ้น</option>
+                        <option value="pieces" data-lang="en" class="hidden">Pieces</option>
+                    </select>
+                    <input type="number" id="startupDefect" class="w-full p-2 border rounded" min="0" step="0.1" value="0">
+                </div>
+                <div>
+                    <label class="block">
+                        <span class="lang-th active">ของเสียระหว่างทำ</span>
+                        <span class="lang-en">Process Defect</span>
+                    </label>
+                    <select id="scrapRateUnit" class="p-2 border rounded mb-2">
+                        <option value="percent" data-lang="th">%</option>
+                        <option value="percent" data-lang="en" class="hidden">%</option>
+                        <option value="pieces" data-lang="th">ชิ้น</option>
+                        <option value="pieces" data-lang="en" class="hidden">Pieces</option>
+                    </select>
+                    <input type="number" id="scrapRate" class="w-full p-2 border rounded" min="0" step="0.1" value="0">
+                </div>
+                <div class="col-span-full flex gap-2">
+                    <button id="saveJobBtn" class="bg-blue-500 text-white p-2 rounded flex-1">
+                        <span class="lang-th active">บันทึกงาน</span>
+                        <span class="lang-en">Save Job</span>
+                    </button>
+                    <button id="calculateBtn" class="bg-purple-500 text-white p-2 rounded flex-1">
+                        <span class="lang-th active">คำนวณ</span>
+                        <span class="lang-en">Calculate</span>
+                    </button>
+                    <button id="deleteJobBtn" class="bg-red-500 text-white p-2 rounded flex-1">
+                        <span class="lang-th active">ลบงาน</span>
+                        <span class="lang-en">Delete Job</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div id="results" class="hidden">
+            <div class="bg-white p-6 rounded shadow-md mb-6">
+                <h2 class="text-xl font-bold mb-4">
+                    <span class="lang-th active">ผลการผลิต</span>
+                    <span class="lang-en">Production Result</span>
+                </h2>
+                <div id="resultTable"></div>
+            </div>
+
+            <div class="bg-white p-6 rounded shadow-md mb-6">
+                <h2 class="text-xl font-bold mb-4">
+                    <span class="lang-th active">สูตรและวิธีคำนวณ</span>
+                    <span class="lang-en">Formula and Calculation Steps</span>
+                </h2>
+                <div id="calculationSteps"></div>
+            </div>
+
+            <div class="bg-white p-6 rounded shadow-md mb-6">
+                <h2 class="text-xl font-bold mb-4">
+                    <span class="lang-th active">วิธีทำให้ดีขึ้นแบบละเอียด</span>
+                    <span class="lang-en">Detailed Tips to Improve</span>
+                </h2>
+                <div id="suggestions"></div>
+            </div>
+        </div>
+    </div>
+    <div id="footer">chaiyapat.cha</div>
+
+    <script>
+        let currentLang = 'th';
+        let jobs = [];
+        let editingJobIndex = null;
+
+        // Language Toggle
+        function switchLang(lang) {
+            currentLang = lang;
+            document.querySelectorAll('.lang-th, .lang-en').forEach(el => {
+                el.classList.toggle('active', el.classList.contains(`lang-${lang}`));
+            });
+            document.querySelectorAll('.lang-block-th, .lang-block-en').forEach(el => {
+                el.classList.toggle('active', el.classList.contains(`lang-block-${lang}`));
+            });
+            document.querySelectorAll('.lang-btn').forEach(btn => {
+                btn.classList.toggle('active-lang', btn.id === `lang-${lang}`);
+            });
+            document.querySelectorAll('[data-lang]').forEach(el => {
+                el.classList.toggle('hidden', el.getAttribute('data-lang') !== lang);
+            });
+            updateSelectOptions();
+            updateStatus('ready');
+            renderJobList();
+            // No need to recalculate, just toggle visibility
+        }
+
+        document.getElementById('lang-th').addEventListener('click', () => switchLang('th'));
+        document.getElementById('lang-en').addEventListener('click', () => switchLang('en'));
+
+        // Update Select Options for Language
+        function updateSelectOptions() {
+            const selects = ['calcMode', 'rateType', 'startupDefectUnit', 'scrapRateUnit'];
+            selects.forEach(selectId => {
+                const select = document.getElementById(selectId);
+                const selectedValue = select.value;
+                Array.from(select.options).forEach(option => {
+                    const lang = option.getAttribute('data-lang');
+                    option.classList.toggle('hidden', lang !== currentLang);
+                });
+                select.value = selectedValue;
+            });
+        }
+
+        // Status Update
+        function updateStatus(state, errorMsg = '') {
+            const status = document.getElementById('status');
+            const errorDiv = document.getElementById('errorMessage');
+            const messages = {
+                ready: { th: 'พร้อมคำนวณ', en: 'Ready to calculate' },
+                calculating: { th: 'กำลังคำนวณ...', en: 'Calculating...' },
+                done: { th: 'เสร็จแล้ว!', en: 'Done!' },
+                error: { th: 'ผิดพลาด!', en: 'Error!' }
+            };
+            status.innerHTML = `
+                <span class="lang-th ${currentLang === 'th' ? 'active' : ''}">${messages[state].th}</span>
+                <span class="lang-en ${currentLang === 'en' ? 'active' : ''}">${messages[state].en}</span>
+            `;
+            status.className = `text-${state === 'done' ? 'green' : state === 'error' ? 'red' : 'gray'}-700`;
+            if (errorMsg) {
+                errorDiv.textContent = errorMsg;
+                errorDiv.classList.remove('hidden');
+            } else {
+                errorDiv.classList.add('hidden');
+            }
+        }
+
+        // Mode Toggle
+        document.getElementById('calcMode').addEventListener('change', (e) => {
+            const mode = e.target.value;
+            document.getElementById('targetOutputDiv').classList.toggle('hidden', mode !== 'time');
+            document.getElementById('fixedTimeDiv').classList.toggle('hidden', mode !== 'output');
+        });
+
+        // Rate Type Toggle
+        document.getElementById('rateType').addEventListener('change', (e) => {
+            const label = document.getElementById('rateLabel');
+            label.innerHTML = `
+                <span class="lang-th ${currentLang === 'th' ? 'active' : ''}">${e.target.value === 'cycleTime' ? 'เวลาไซเคิล (วินาที/ชิ้น)' : 'ชิ้นต่อชั่วโมง'}</span>
+                <span class="lang-en ${currentLang === 'en' ? 'active' : ''}">${e.target.value === 'cycleTime' ? 'Cycle Time (sec/piece)' : 'Pieces per Hour'}</span>
+            `;
+            document.getElementById('cycleTime').value = '';
+        });
+
+        // Job Management
+        document.getElementById('addJobBtn').addEventListener('click', () => {
+            editingJobIndex = null;
+            clearForm();
+            document.getElementById('saveJobBtn').innerHTML = `
+                <span class="lang-th ${currentLang === 'th' ? 'active' : ''}">บันทึกงาน</span>
+                <span class="lang-en ${currentLang === 'en' ? 'active' : ''}">Save Job</span>
+            `;
+        });
+
+        document.getElementById('saveJobBtn').addEventListener('click', () => {
+            const job = {
+                calcMode: document.getElementById('calcMode').value,
+                startTime: document.getElementById('startTime').value,
+                targetOutput: document.getElementById('targetOutput').value,
+                fixedTime: document.getElementById('fixedTime').value,
+                rateType: document.getElementById('rateType').value,
+                cycleTime: document.getElementById('cycleTime').value,
+                setupTime: document.getElementById('setupTime').value,
+                breakTimes: Array.from(document.querySelectorAll('input[name="breakTime"]:checked')).map(cb => cb.value),
+                partName: document.getElementById('partName').value || (currentLang === 'th' ? 'ชิ้นงานไม่มีชื่อ' : 'Unnamed Part'),
+                startupDefectUnit: document.getElementById('startupDefectUnit').value,
+                startupDefect: document.getElementById('startupDefect').value,
+                scrapRateUnit: document.getElementById('scrapRateUnit').value,
+                scrapRate: document.getElementById('scrapRate').value
+            };
+
+            if (!job.startTime || !job.cycleTime || (job.calcMode === 'time' && !job.targetOutput) || (job.calcMode === 'output' && !job.fixedTime)) {
+                updateStatus('error', currentLang === 'th' ? 'กรุณากรอกข้อมูลให้ครบถ้วน!' : 'Please fill in all required fields!');
+                return;
+            }
+
+            // Validate inputs
+            if (parseFloat(job.cycleTime) <= 0) {
+                updateStatus('error', currentLang === 'th' ? 'เวลาไซเคิลต้องมากกว่า 0!' : 'Cycle Time must be greater than 0!');
+                return;
+            }
+            if (parseFloat(job.targetOutput) <= 0 && job.calcMode === 'time') {
+                updateStatus('error', currentLang === 'th' ? 'จำนวนชิ้นที่ต้องการต้องมากกว่า 0!' : 'Target Pieces must be greater than 0!');
+                return;
+            }
+
+            if (editingJobIndex !== null) {
+                jobs[editingJobIndex] = job;
+            } else {
+                jobs.push(job);
+            }
+            renderJobList();
+            clearForm();
+        });
+
+        document.getElementById('calculateBtn').addEventListener('click', () => {
+            if (jobs.length === 0) {
+                updateStatus('error', currentLang === 'th' ? 'กรุณาเพิ่มงานอย่างน้อยหนึ่งงาน!' : 'Please add at least one job!');
+                return;
+            }
+            try {
+                calculateLeadTime();
+            } catch (error) {
+                console.error('Calculation Error:', error);
+                updateStatus('error', currentLang === 'th' ? 'เกิดข้อผิดพลาดในการคำนวณ: ' + error.message : 'Calculation Error: ' + error.message);
+            }
+        });
+
+        document.getElementById('deleteJobBtn').addEventListener('click', () => {
+            jobs = [];
+            renderJobList();
+            document.getElementById('results').classList.add('hidden');
+            clearForm();
+            updateStatus('ready');
+        });
+
+        function editJob(index) {
+            editingJobIndex = index;
+            const job = jobs[index];
+            document.getElementById('calcMode').value = job.calcMode;
+            document.getElementById('startTime').value = job.startTime;
+            document.getElementById('targetOutput').value = job.targetOutput;
+            document.getElementById('fixedTime').value = job.fixedTime;
+            document.getElementById('rateType').value = job.rateType;
+            document.getElementById('cycleTime').value = job.cycleTime;
+            document.getElementById('setupTime').value = job.setupTime;
+            document.querySelectorAll('input[name="breakTime"]').forEach(cb => cb.checked = job.breakTimes.includes(cb.value));
+            document.getElementById('partName').value = job.partName;
+            document.getElementById('startupDefectUnit').value = job.startupDefectUnit;
+            document.getElementById('startupDefect').value = job.startupDefect;
+            document.getElementById('scrapRateUnit').value = job.scrapRateUnit;
+            document.getElementById('scrapRate').value = job.scrapRate;
+
+            document.getElementById('saveJobBtn').innerHTML = `
+                <span class="lang-th ${currentLang === 'th' ? 'active' : ''}">อัปเดตงาน</span>
+                <span class="lang-en ${currentLang === 'en' ? 'active' : ''}">Update Job</span>
+            `;
+            document.getElementById('calcMode').dispatchEvent(new Event('change'));
+        }
+
+        function deleteJobItem(index) {
+            jobs.splice(index, 1);
+            renderJobList();
+            if (jobs.length > 0) calculateLeadTime();
+            else document.getElementById('results').classList.add('hidden');
+        }
+
+        function clearForm() {
+            document.getElementById('calcMode').value = 'time';
+            document.getElementById('startTime').value = '';
+            document.getElementById('targetOutput').value = '';
+            document.getElementById('fixedTime').value = '';
+            document.getElementById('rateType').value = 'cycleTime';
+            document.getElementById('cycleTime').value = '';
+            document.getElementById('setupTime').value = '0';
+            document.querySelectorAll('input[name="breakTime"]').forEach(cb => cb.checked = false);
+            document.getElementById('partName').value = '';
+            document.getElementById('startupDefectUnit').value = 'percent';
+            document.getElementById('startupDefect').value = '0';
+            document.getElementById('scrapRateUnit').value = 'percent';
+            document.getElementById('scrapRate').value = '0';
+            document.querySelectorAll('input').forEach(input => input.style.borderColor = '');
+            document.getElementById('calcMode').dispatchEvent(new Event('change'));
+        }
+
+        function renderJobList() {
+            const jobList = document.getElementById('jobList');
+            jobList.innerHTML = jobs.map((job, index) => `
+                <div class="job-item">
+                    <span>${job.partName} (${job.calcMode === 'time' ? job.targetOutput + ' pcs' : 'until ' + format24Hour(new Date(job.fixedTime))})</span>
+                    <div>
+                        <button onclick="editJob(${index})" class="bg-yellow-500 text-white p-1 rounded">
+                            <span class="lang-th ${currentLang === 'th' ? 'active' : ''}">แก้ไข</span>
+                            <span class="lang-en ${currentLang === 'en' ? 'active' : ''}">Edit</span>
+                        </button>
+                        <button onclick="deleteJobItem(${index})" class="bg-red-500 text-white p-1 rounded">
+                            <span class="lang-th ${currentLang === 'th' ? 'active' : ''}">ลบ</span>
+                            <span class="lang-en ${currentLang === 'en' ? 'active' : ''}">Delete</span>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getBreakTimeMinutes(breakTimes, startTime, endTime) {
+            const breakTimesMap = {
+                "10:00-10:10": 10,
+                "12:00-12:50": 50,
+                "15:00-15:10": 10,
+                "17:00-17:30": 30,
+                "22:00-22:10": 10,
+                "00:00-01:00": 60,
+                "03:00-03:10": 10,
+                "05:00-05:10": 10
+            };
+            let totalBreakMin = 0;
+            const start = new Date(startTime);
+            const end = new Date(endTime);
+
+            breakTimes.forEach(time => {
+                const [startStr, endStr] = time.split('-');
+                let breakStart = new Date(start);
+                let breakEnd = new Date(start);
+
+                const [startHour, startMin] = startStr.split(':').map(Number);
+                const [endHour, endMin] = endStr.split(':').map(Number);
+
+                breakStart.setHours(startHour, startMin, 0, 0);
+                breakEnd = new Date(breakStart);
+                breakEnd.setHours(endHour, endMin, 0, 0);
+
+                if (breakEnd <= breakStart) {
+                    breakEnd.setDate(breakEnd.getDate() + 1);
+                }
+
+                if (breakStart < end && breakEnd > start) {
+                    const overlapStart = breakStart > start ? breakStart : start;
+                    const overlapEnd = breakEnd < end ? breakEnd : end;
+                    const overlapMin = (overlapEnd - overlapStart) / (1000 * 60);
+                    totalBreakMin += overlapMin;
+                }
+
+                if (end > breakStart && start.getDate() !== end.getDate()) {
+                    let nextDayBreakStart = new Date(breakStart);
+                    let nextDayBreakEnd = new Date(breakEnd);
+                    nextDayBreakStart.setDate(nextDayBreakStart.getDate() + 1);
+                    nextDayBreakEnd.setDate(nextDayBreakEnd.getDate() + 1);
+
+                    if (nextDayBreakStart < end && nextDayBreakEnd > start) {
+                        const overlapStart = nextDayBreakStart > start ? nextDayBreakStart : start;
+                        const overlapEnd = nextDayBreakEnd < end ? nextDayBreakEnd : end;
+                        const overlapMin = (overlapEnd - overlapStart) / (1000 * 60);
+                        totalBreakMin += overlapMin;
+                    }
+                }
+            });
+
+            return Math.round(totalBreakMin);
+        }
+
+        function format24Hour(date) {
+            const pad = (num) => num.toString().padStart(2, '0');
+            const year = date.getFullYear();
+            const month = pad(date.getMonth() + 1);
+            const day = pad(date.getDate());
+            const hours = pad(date.getHours());
+            const minutes = pad(date.getMinutes());
+            const seconds = pad(date.getSeconds());
+            return `
+                <span class="lang-th ${currentLang === 'th' ? 'active' : ''}">${day}/${month}/${year + 543} ${hours}:${minutes}:${seconds}</span>
+                <span class="lang-en ${currentLang === 'en' ? 'active' : ''}">${year}-${month}-${day} ${hours}:${minutes}:${seconds}</span>
+            `;
+        }
+
+        function calculateLeadTime() {
+            if (jobs.length === 0) {
+                updateStatus('error', currentLang === 'th' ? 'กรุณาเพิ่มงานอย่างน้อยหนึ่งงาน!' : 'Please add at least one job!');
+                return;
+            }
+
+            updateStatus('calculating');
+            let resultTable = { th: [], en: [] };
+            let calculationSteps = { th: [], en: [] };
+            let suggestions = { th: [], en: [] };
+            let currentStartTime = new Date(jobs[0].startTime);
+            let allBreakTimes = Array.from(new Set(jobs.flatMap(job => job.breakTimes)));
+
+            jobs.forEach((job, index) => {
+                const mode = job.calcMode;
+                const startTime = job.startTime;
+                const rateType = job.rateType;
+                let cycleTime = parseFloat(job.cycleTime);
+                const setupTimeMin = parseFloat(job.setupTime) || 0;
+                const breakTimes = job.breakTimes;
+                const partName = job.partName;
+                let startupDefect = parseFloat(job.startupDefect) || 0;
+                let scrapRate = parseFloat(job.scrapRate) || 0;
+                const startupDefectUnit = job.startupDefectUnit;
+                const scrapRateUnit = job.scrapRateUnit;
+
+                if (!startTime || !cycleTime) {
+                    updateStatus('error', currentLang === 'th' ? `งาน ${partName}: กรุณากรอกเวลาเริ่มและเวลาไซเคิล!` : `Job ${partName}: Please enter Start Time and Cycle Time!`);
+                    return;
+                }
+
+                if (rateType === 'piecesPerHour') {
+                    cycleTime = 3600 / cycleTime;
+                }
+
+                const setupTime = setupTimeMin * 60;
+                let totalParts, totalCycleTime, totalTime, completionTime, targetOutput;
+
+                if (mode === 'time') {
+                    targetOutput = parseFloat(job.targetOutput);
+                    if (isNaN(targetOutput) || targetOutput <= 0) {
+                        updateStatus('error', currentLang === 'th' ? `งาน ${partName}: กรุณากรอกจำนวนชิ้นที่ต้องการให้ถูกต้อง!` : `Job ${partName}: Please enter a valid Target Pieces!`);
+                        return;
+                    }
+
+                    let defectFactor = 1;
+                    if (startupDefectUnit === 'percent') startupDefect /= 100;
+                    if (scrapRateUnit === 'percent') scrapRate /= 100;
+
+                    if (startupDefectUnit === 'percent' && scrapRateUnit === 'percent') {
+                        defectFactor = 1 + startupDefect + scrapRate;
+                        totalParts = Math.ceil(targetOutput * defectFactor);
+                        calculationSteps.th.push(`งาน ${partName}: 1. คำนวณจำนวนชิ้นทั้งหมด (รวมของเสีย): ${targetOutput} × (1 + ${startupDefect * 100}% + ${scrapRate * 100}%) = ${targetOutput} × ${defectFactor} = ${totalParts} ชิ้น`);
+                        calculationSteps.en.push(`Job ${partName}: 1. Calculate Total Pieces (with defects): ${targetOutput} × (1 + ${startupDefect * 100}% + ${scrapRate * 100}%) = ${targetOutput} × ${defectFactor} = ${totalParts} pcs`);
+                    } else if (startupDefectUnit === 'pieces' && scrapRateUnit === 'pieces') {
+                        totalParts = targetOutput + startupDefect + scrapRate;
+                        calculationSteps.th.push(`งาน ${partName}: 1. คำนวณจำนวนชิ้นทั้งหมด (รวมของเสีย): ${targetOutput} + ${startupDefect} + ${scrapRate} = ${totalParts} ชิ้น`);
+                        calculationSteps.en.push(`Job ${partName}: 1. Calculate Total Pieces (with defects): ${targetOutput} + ${startupDefect} + ${scrapRate} = ${totalParts} pcs`);
+                    } else {
+                        updateStatus('error', currentLang === 'th' ? `งาน ${partName}: หน่วยของเสียต้องเหมือนกัน (ทั้ง % หรือทั้งชิ้น)!` : `Job ${partName}: Defect units must be the same (both % or both pieces)!`);
+                        return;
+                    }
+
+                    totalCycleTime = totalParts * cycleTime;
+                    calculationSteps.th.push(`งาน ${partName}: 2. คำนวณเวลาทำงาน: ${totalParts} × ${cycleTime} วินาที = ${totalCycleTime} วินาที (${(totalCycleTime / 60).toFixed(1)} นาที)`);
+                    calculationSteps.en.push(`Job ${partName}: 2. Calculate Production Time: ${totalParts} × ${cycleTime} sec = ${totalCycleTime} sec (${(totalCycleTime / 60).toFixed(1)} min)`);
+
+                    totalTime = totalCycleTime + setupTime;
+                    completionTime = new Date(new Date(startTime).getTime() + totalTime * 1000);
+                    const breakTimeMin = getBreakTimeMinutes(allBreakTimes, startTime, completionTime);
+                    calculationSteps.th.push(`งาน ${partName}: 3. คำนวณเวลาพัก: ${allBreakTimes.length > 0 ? allBreakTimes.join(', ') + ' = ' + breakTimeMin : '0'} นาที`);
+                    calculationSteps.en.push(`Job ${partName}: 3. Calculate Break Time: ${allBreakTimes.length > 0 ? allBreakTimes.join(', ') + ' = ' + breakTimeMin : '0'} min`);
+
+                    totalTime += breakTimeMin * 60;
+                    completionTime = new Date(new Date(startTime).getTime() + totalTime * 1000);
+                    calculationSteps.th.push(`งาน ${partName}: 4. คำนวณเวลาทั้งหมด: ${totalCycleTime} + ${setupTime} + (${breakTimeMin} × 60) = ${totalTime} วินาที (${(totalTime / 60).toFixed(1)} นาที)`);
+                    calculationSteps.en.push(`Job ${partName}: 4. Calculate Total Time: ${totalCycleTime} + ${setupTime} + (${breakTimeMin} × 60) = ${totalTime} sec (${(totalTime / 60).toFixed(1)} min)`);
+
+                    calculationSteps.th.push(`งาน ${partName}: 5. คำนวณเวลาที่เสร็จ: ${format24Hour(new Date(startTime))} + ${(totalTime / 3600).toFixed(2)} ชั่วโมง = ${format24Hour(completionTime)}`);
+                    calculationSteps.en.push(`Job ${partName}: 5. Calculate Finish Time: ${format24Hour(new Date(startTime))} + ${(totalTime / 3600).toFixed(2)} hr = ${format24Hour(completionTime)}`);
+
+                    resultTable.th.push(`
+                        <h3 class="font-bold mt-4">งาน ${partName}</h3>
+                        <table class="w-full text-left mb-4">
+                            <tr>
+                                <td>ชื่อชิ้นงาน:</td>
+                                <td>${partName}</td>
+                            </tr>
+                            <tr>
+                                <td>จำนวนชิ้นที่ต้องการ:</td>
+                                <td>${targetOutput} ชิ้น</td>
+                            </tr>
+                            <tr>
+                                <td>ชิ้นทั้งหมด (รวมของเสีย):</td>
+                                <td>${totalParts} ชิ้น</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาทำงาน:</td>
+                                <td>${(totalCycleTime / 60).toFixed(1)} นาที (${(totalCycleTime / 3600).toFixed(2)} ชั่วโมง)</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาเตรียม:</td>
+                                <td>${(setupTime / 60).toFixed(1)} นาที (${(setupTime / 3600).toFixed(2)} ชั่วโมง)</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาพัก:</td>
+                                <td>${breakTimeMin} นาที (${(breakTimeMin / 60).toFixed(2)} ชั่วโมง)</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาทั้งหมด:</td>
+                                <td>${(totalTime / 60).toFixed(1)} นาที (${(totalTime / 3600).toFixed(2)} ชั่วโมง)</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาเริ่มที่กำหนด:</td>
+                                <td>${format24Hour(new Date(startTime))}</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาที่เสร็จ:</td>
+                                <td>${format24Hour(completionTime)}</td>
+                            </tr>
+                        </table>
+                    `);
+                    resultTable.en.push(`
+                        <h3 class="font-bold mt-4">Job ${partName}</h3>
+                        <table class="w-full text-left mb-4">
+                            <tr>
+                                <td>Part Name:</td>
+                                <td>${partName}</td>
+                            </tr>
+                            <tr>
+                                <td>Target Pieces:</td>
+                                <td>${targetOutput} pcs</td>
+                            </tr>
+                            <tr>
+                                <td>Total Pieces (with defects):</td>
+                                <td>${totalParts} pcs</td>
+                            </tr>
+                            <tr>
+                                <td>Production Time:</td>
+                                <td>${(totalCycleTime / 60).toFixed(1)} min (${(totalCycleTime / 3600).toFixed(2)} hr)</td>
+                            </tr>
+                            <tr>
+                                <td>Setup Time:</td>
+                                <td>${(setupTime / 60).toFixed(1)} min (${(setupTime / 3600).toFixed(2)} hr)</td>
+                            </tr>
+                            <tr>
+                                <td>Break Time:</td>
+                                <td>${breakTimeMin} min (${(breakTimeMin / 60).toFixed(2)} hr)</td>
+                            </tr>
+                            <tr>
+                                <td>Total Time:</td>
+                                <td>${(totalTime / 60).toFixed(1)} min (${(totalTime / 3600).toFixed(2)} hr)</td>
+                            </tr>
+                            <tr>
+                                <td>Specified Start Time:</td>
+                                <td>${format24Hour(new Date(startTime))}</td>
+                            </tr>
+                            <tr>
+                                <td>Finish Time:</td>
+                                <td>${format24Hour(completionTime)}</td>
+                            </tr>
+                        </table>
+                    `);
+
+                    // Improvement Suggestions - Refactored for language switching
+                    const newCycleTime = cycleTime * 0.8;
+                    const newSetupTime = setupTime * 0.7;
+                    const newStartupDefect = startupDefectUnit === 'percent' ? startupDefect * 0.5 : startupDefect / targetOutput;
+                    const newScrapRate = scrapRateUnit === 'percent' ? scrapRate * 0.5 : scrapRate / targetOutput;
+                    const newTotalParts = Math.ceil(targetOutput * (1 + newStartupDefect + newScrapRate));
+                    const newCycleTimeTotal = totalParts * newCycleTime;
+                    const newSetupTimeTotal = totalCycleTime + newSetupTime;
+                    const newDefectCycleTime = newTotalParts * cycleTime;
+                    const newTotalTimeWithNewCycle = newCycleTimeTotal + setupTime + breakTimeMin * 60;
+                    const newTotalTimeWithNewSetup = totalCycleTime + newSetupTime + breakTimeMin * 60;
+                    const newTotalTimeWithNewDefect = newDefectCycleTime + setupTime + breakTimeMin * 60;
+                    const newCompletionTimeWithNewCycle = new Date(new Date(startTime).getTime() + newTotalTimeWithNewCycle * 1000);
+                    const newCompletionTimeWithNewSetup = new Date(new Date(startTime).getTime() + newTotalTimeWithNewSetup * 1000);
+                    const newCompletionTimeWithNewDefect = new Date(new Date(startTime).getTime() + newTotalTimeWithNewDefect * 1000);
+
+                    suggestions.th.push(`
+                        <div>
+                            <p><strong>งาน ${partName}:</strong></p>
+                            <div class="lang-block-th ${currentLang === 'th' ? 'active' : ''}">
+                                <p><strong>1. ลดเวลาไซเคิล 20% (เหลือ ${newCycleTime.toFixed(1)} วินาที):</strong><br>
+                                - ปรับปรุงระบบระบายความร้อนของแม่พิมพ์ (Mold Cooling Optimization)<br>
+                                - เวลาทำงานใหม่: ${(newCycleTimeTotal / 60).toFixed(1)} นาที<br>
+                                - ประหยัดเวลา: ${(totalCycleTime * 0.2 / 60).toFixed(1)} นาที<br>
+                                - เวลาทั้งหมดใหม่: ${(newTotalTimeWithNewCycle / 60).toFixed(1)} นาที<br>
+                                - เสร็จใหม่เวลา: ${format24Hour(newCompletionTimeWithNewCycle)}</p>
+                                <p><strong>2. ลดเวลาเตรียม 30% (เหลือ ${(setupTime / 60 * 0.7).toFixed(1)} นาที):</strong><br>
+                                - ใช้ SMED (Single-Minute Exchange of Die) เพื่อลดเวลาเปลี่ยนแม่พิมพ์<br>
+                                - เวลาเตรียมใหม่: ${(newSetupTime / 60).toFixed(1)} นาที<br>
+                                - ประหยัดเวลา: ${(setupTime * 0.3 / 60).toFixed(1)} นาที<br>
+                                - เวลาทั้งหมดใหม่: ${(newTotalTimeWithNewSetup / 60).toFixed(1)} นาที<br>
+                                - เสร็จใหม่เวลา: ${format24Hour(newCompletionTimeWithNewSetup)}</p>
+                                <p><strong>3. ลดของเสีย 50% (จาก ${(startupDefect * 100 + scrapRate * 100).toFixed(1)}% เหลือ ${((startupDefect * 100 + scrapRate * 100) * 0.5).toFixed(1)}%):</strong><br>
+                                - ใช้ Six Sigma และ SPC (Statistical Process Control) เพื่อควบคุมคุณภาพ<br>
+                                - ชิ้นทั้งหมดใหม่: ${newTotalParts} ชิ้น<br>
+                                - เวลาทำงานใหม่: ${(newDefectCycleTime / 60).toFixed(1)} นาที<br>
+                                - ประหยัดเวลา: ${((totalParts - newTotalParts) * cycleTime / 60).toFixed(1)} นาที<br>
+                                - เวลาทั้งหมดใหม่: ${(newTotalTimeWithNewDefect / 60).toFixed(1)} นาที<br>
+                                - เสร็จใหม่เวลา: ${format24Hour(newCompletionTimeWithNewDefect)}</p>
+                            </div>
+                        </div>
+                    `);
+                    suggestions.en.push(`
+                        <div>
+                            <p><strong>Job ${partName}:</strong></p>
+                            <div class="lang-block-en ${currentLang === 'en' ? 'active' : ''}">
+                                <p><strong>1. Reduce Cycle Time by 20% (to ${newCycleTime.toFixed(1)} sec):</strong><br>
+                                - Optimize mold cooling system (Mold Cooling Optimization)<br>
+                                - New Production Time: ${(newCycleTimeTotal / 60).toFixed(1)} min<br>
+                                - Time Saved: ${(totalCycleTime * 0.2 / 60).toFixed(1)} min<br>
+                                - New Total Time: ${(newTotalTimeWithNewCycle / 60).toFixed(1)} min<br>
+                                - New Finish Time: ${format24Hour(newCompletionTimeWithNewCycle)}</p>
+                                <p><strong>2. Reduce Setup Time by 30% (to ${(setupTime / 60 * 0.7).toFixed(1)} min):</strong><br>
+                                - Implement SMED (Single-Minute Exchange of Die) for faster mold changes<br>
+                                - New Setup Time: ${(newSetupTime / 60).toFixed(1)} min<br>
+                                - Time Saved: ${(setupTime * 0.3 / 60).toFixed(1)} min<br>
+                                - New Total Time: ${(newTotalTimeWithNewSetup / 60).toFixed(1)} min<br>
+                                - New Finish Time: ${format24Hour(newCompletionTimeWithNewSetup)}</p>
+                                <p><strong>3. Reduce Defects by 50% (from ${(startupDefect * 100 + scrapRate * 100).toFixed(1)}% to ${((startupDefect * 100 + scrapRate * 100) * 0.5).toFixed(1)}%):</strong><br>
+                                - Apply Six Sigma and SPC (Statistical Process Control) for quality control<br>
+                                - New Total Pieces: ${newTotalParts} pcs<br>
+                                - New Production Time: ${(newDefectCycleTime / 60).toFixed(1)} min<br>
+                                - Time Saved: ${((totalParts - newTotalParts) * cycleTime / 60).toFixed(1)} min<br>
+                                - New Total Time: ${(newTotalTimeWithNewDefect / 60).toFixed(1)} min<br>
+                                - New Finish Time: ${format24Hour(newCompletionTimeWithNewDefect)}</p>
+                            </div>
+                        </div>
+                    `);
+
+                    currentStartTime = completionTime;
+                } else {
+                    const fixedTime = job.fixedTime;
+                    if (!fixedTime) {
+                        updateStatus('error', currentLang === 'th' ? `งาน ${partName}: กรุณากรอกเวลาที่ต้องเสร็จ!` : `Job ${partName}: Please enter Finish Time!`);
+                        return;
+                    }
+                    const availableTime = (new Date(fixedTime) - new Date(startTime)) / 1000;
+                    if (availableTime <= 0) {
+                        updateStatus('error', currentLang === 'th' ? `งาน ${partName}: เวลาที่ต้องเสร็จต้องอยู่หลังเวลาเริ่ม!` : `Job ${partName}: Finish Time must be after Start Time!`);
+                        return;
+                    }
+                    totalTime = availableTime;
+                    calculationSteps.th.push(`งาน ${partName}: 1. คำนวณเวลาที่ใช้ได้: (${format24Hour(new Date(fixedTime))} - ${format24Hour(new Date(startTime))}) = ${(totalTime / 60).toFixed(1)} นาที`);
+                    calculationSteps.en.push(`Job ${partName}: 1. Calculate Available Time: (${format24Hour(new Date(fixedTime))} - ${format24Hour(new Date(startTime))}) = ${(totalTime / 60).toFixed(1)} min`);
+
+                    const breakTimeMin = getBreakTimeMinutes(allBreakTimes, startTime, fixedTime);
+                    calculationSteps.th.push(`งาน ${partName}: 2. คำนวณเวลาพัก: ${allBreakTimes.length > 0 ? allBreakTimes.join(', ') + ' = ' + breakTimeMin : '0'} นาที`);
+                    calculationSteps.en.push(`Job ${partName}: 2. Calculate Break Time: ${allBreakTimes.length > 0 ? allBreakTimes.join(', ') + ' = ' + breakTimeMin : '0'} min`);
+
+                    totalCycleTime = totalTime - setupTime - (breakTimeMin * 60);
+                    calculationSteps.th.push(`งาน ${partName}: 3. คำนวณเวลาทำงาน: ${totalTime} - ${setupTime} - (${breakTimeMin} × 60) = ${totalCycleTime} วินาที (${(totalCycleTime / 60).toFixed(1)} นาที)`);
+                    calculationSteps.en.push(`Job ${partName}: 3. Calculate Production Time: ${totalTime} - ${setupTime} - (${breakTimeMin} × 60) = ${totalCycleTime} sec (${(totalCycleTime / 60).toFixed(1)} min)`);
+
+                    if (totalCycleTime <= 0) {
+                        updateStatus('error', currentLang === 'th' ? `งาน ${partName}: เวลาไม่พอหลังเตรียมและพัก!` : `Job ${partName}: Not enough time after setup and breaks!`);
+                        return;
+                    }
+                    totalParts = Math.floor(totalCycleTime / cycleTime);
+                    calculationSteps.th.push(`งาน ${partName}: 4. คำนวณชิ้นทั้งหมด (รวมของเสีย): ${totalCycleTime} ÷ ${cycleTime} = ${totalParts} ชิ้น`);
+                    calculationSteps.en.push(`Job ${partName}: 4. Calculate Total Pieces (with defects): ${totalCycleTime} ÷ ${cycleTime} = ${totalParts} pcs`);
+
+                    if (startupDefectUnit === 'percent') startupDefect /= 100;
+                    if (scrapRateUnit === 'percent') scrapRate /= 100;
+                    if (startupDefectUnit === 'percent' && scrapRateUnit === 'percent') {
+                        targetOutput = Math.floor(totalParts / (1 + startupDefect + scrapRate));
+                        calculationSteps.th.push(`งาน ${partName}: 5. คำนวณจำนวนชิ้นที่ทำได้: ${totalParts} ÷ (1 + ${startupDefect * 100}% + ${scrapRate * 100}%) = ${targetOutput} ชิ้น`);
+                        calculationSteps.en.push(`Job ${partName}: 5. Calculate Pieces Possible: ${totalParts} ÷ (1 + ${startupDefect * 100}% + ${scrapRate * 100}%) = ${targetOutput} pcs`);
+                    } else if (startupDefectUnit === 'pieces' && scrapRateUnit === 'pieces') {
+                        targetOutput = totalParts - startupDefect - scrapRate;
+                        calculationSteps.th.push(`งาน ${partName}: 5. คำนวณจำนวนชิ้นที่ทำได้: ${totalParts} - ${startupDefect} - ${scrapRate} = ${targetOutput} ชิ้น`);
+                        calculationSteps.en.push(`Job ${partName}: 5. Calculate Pieces Possible: ${totalParts} - ${startupDefect} - ${scrapRate} = ${targetOutput} pcs`);
+                    } else {
+                        updateStatus('error', currentLang === 'th' ? `งาน ${partName}: หน่วยของเสียต้องเหมือนกัน (ทั้ง % หรือทั้งชิ้น)!` : `Job ${partName}: Defect units must be the same (both % or both pieces)!`);
+                        return;
+                    }
+
+                    resultTable.th.push(`
+                        <h3 class="font-bold mt-4">งาน ${partName}</h3>
+                        <table class="w-full text-left mb-4">
+                            <tr>
+                                <td>ชื่อชิ้นงาน:</td>
+                                <td>${partName}</td>
+                            </tr>
+                            <tr>
+                                <td>ชิ้นทั้งหมด (รวมของเสีย):</td>
+                                <td>${totalParts} ชิ้น</td>
+                            </tr>
+                            <tr>
+                                <td>จำนวนชิ้นที่ทำได้:</td>
+                                <td>${targetOutput} ชิ้น</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาทำงาน:</td>
+                                <td>${(totalCycleTime / 60).toFixed(1)} นาที (${(totalCycleTime / 3600).toFixed(2)} ชั่วโมง)</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาเตรียม:</td>
+                                <td>${(setupTime / 60).toFixed(1)} นาที (${(setupTime / 3600).toFixed(2)} ชั่วโมง)</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาพัก:</td>
+                                <td>${breakTimeMin} นาที (${(breakTimeMin / 60).toFixed(2)} ชั่วโมง)</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาทั้งหมด:</td>
+                                <td>${(totalTime / 60).toFixed(1)} นาที (${(totalTime / 3600).toFixed(2)} ชั่วโมง)</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาเริ่มที่กำหนด:</td>
+                                <td>${format24Hour(new Date(startTime))}</td>
+                            </tr>
+                            <tr>
+                                <td>เวลาที่ต้องเสร็จ:</td>
+                                <td>${format24Hour(new Date(fixedTime))}</td>
+                            </tr>
+                        </table>
+                    `);
+                    resultTable.en.push(`
+                        <h3 class="font-bold mt-4">Job ${partName}</h3>
+                        <table class="w-full text-left mb-4">
+                            <tr>
+                                <td>Part Name:</td>
+                                <td>${partName}</td>
+                            </tr>
+                            <tr>
+                                <td>Total Pieces (with defects):</td>
+                                <td>${totalParts} pcs</td>
+                            </tr>
+                            <tr>
+                                <td>Pieces Possible:</td>
+                                <td>${targetOutput} pcs</td>
+                            </tr>
+                            <tr>
+                                <td>Production Time:</td>
+                                <td>${(totalCycleTime / 60).toFixed(1)} min (${(totalCycleTime / 3600).toFixed(2)} hr)</td>
+                            </tr>
+                            <tr>
+                                <td>Setup Time:</td>
+                                <td>${(setupTime / 60).toFixed(1)} min (${(setupTime / 3600).toFixed(2)} hr)</td>
+                            </tr>
+                            <tr>
+                                <td>Break Time:</td>
+                                <td>${breakTimeMin} min (${(breakTimeMin / 60).toFixed(2)} hr)</td>
+                            </tr>
+                            <tr>
+                                <td>Total Time:</td>
+                                <td>${(totalTime / 60).toFixed(1)} min (${(totalTime / 3600).toFixed(2)} hr)</td>
+                            </tr>
+                            <tr>
+                                <td>Specified Start Time:</td>
+                                <td>${format24Hour(new Date(startTime))}</td>
+                            </tr>
+                            <tr>
+                                <td>Finish Time:</td>
+                                <td>${format24Hour(new Date(fixedTime))}</td>
+                            </tr>
+                        </table>
+                    `);
+
+                    // Improvement Suggestions for mode === 'output'
+                    const newCycleTimeOutput = cycleTime * 0.8;
+                    const newSetupTimeOutput = setupTime * 0.7;
+                    const newStartupDefectOutput = startupDefect * 0.5;
+                    const newScrapRateOutput = scrapRate * 0.5;
+                    const totalDefectRate = startupDefect + scrapRate;
+                    const newTotalDefectRate = newStartupDefectOutput + newScrapRateOutput;
+
+                    // 1. Reduce Cycle Time
+                    const newTotalPartsOutputWithCycle = Math.floor(totalCycleTime / newCycleTimeOutput);
+                    const newTargetOutputWithCycle = Math.floor(newTotalPartsOutputWithCycle / (1 + totalDefectRate));
+                    const extraPiecesFromCycle = newTargetOutputWithCycle - targetOutput;
+
+                    // 2. Reduce Setup Time
+                    const extraTimeFromSetup = setupTime * 0.3;
+                    const extraPartsFromSetupBeforeDefect = Math.floor(extraTimeFromSetup / cycleTime);
+                    const extraPiecesFromSetup = Math.floor(extraPartsFromSetupBeforeDefect / (1 + totalDefectRate));
+                    const newTotalTimeWithNewSetup = totalTime - extraTimeFromSetup;
+                    const newTotalCycleTimeWithNewSetup = newTotalTimeWithNewSetup - (breakTimeMin * 60);
+                    const newTotalPiecesWithSetupBeforeDefect = Math.floor(newTotalCycleTimeWithNewSetup / cycleTime);
+                    const newTotalPiecesWithSetup = Math.floor(newTotalPiecesWithSetupBeforeDefect / (1 + totalDefectRate));
+
+                    // 3. Reduce Defects
+                    const newTotalPiecesWithDefect = Math.floor(totalParts / (1 + newTotalDefectRate));
+                    const extraPiecesFromDefect = newTotalPiecesWithDefect - targetOutput;
+
+                    suggestions.th.push(`
+                        <div>
+                            <p><strong>งาน ${partName}:</strong></p>
+                            <div class="lang-block-th ${currentLang === 'th' ? 'active' : ''}">
+                                <p><strong>1. ลดเวลาไซเคิล 20% (จาก ${cycleTime} วินาที เหลือ ${newCycleTimeOutput.toFixed(1)} วินาที):</strong><br>
+                                - ปรับปรุงระบบระบายความร้อนของแม่พิมพ์ (Mold Cooling Optimization)<br>
+                                - เดิม: เวลาทำงาน ${totalCycleTime} วินาที → จำนวนชิ้นทั้งหมด ${totalParts} ชิ้น<br>
+                                - ใหม่: เวลาทำงาน ${totalCycleTime} วินาที ÷ ${newCycleTimeOutput.toFixed(1)} วินาที/ชิ้น = ${newTotalPartsOutputWithCycle} ชิ้น (รวมของเสีย)<br>
+                                - จำนวนชิ้นที่ทำได้ใหม่: ${newTotalPartsOutputWithCycle} ÷ (1 + ${totalDefectRate * 100}%) = ${newTargetOutputWithCycle} ชิ้น<br>
+                                - ชิ้นเพิ่ม: ${newTargetOutputWithCycle} - ${targetOutput} = ${extraPiecesFromCycle} ชิ้น<br>
+                                - ชิ้นทั้งหมดที่ทำได้: ${newTargetOutputWithCycle} ชิ้น</p>
+                                <p><strong>2. ลดเวลาเตรียม 30% (จาก ${(setupTime / 60).toFixed(1)} นาที เหลือ ${(newSetupTimeOutput / 60).toFixed(1)} นาที):</strong><br>
+                                - ใช้ SMED (Single-Minute Exchange of Die) เพื่อลดเวลาเปลี่ยนแม่พิมพ์<br>
+                                - เวลาเตรียมใหม่: ${(newSetupTimeOutput / 60).toFixed(1)} นาที<br>
+                                - เวลาที่เพิ่ม: ${(extraTimeFromSetup / 60).toFixed(1)} นาที<br>
+                                - ชิ้นเพิ่ม (ก่อนหักของเสีย): ${extraTimeFromSetup} วินาที ÷ ${cycleTime} วินาที/ชิ้น = ${extraPartsFromSetupBeforeDefect} ชิ้น<br>
+                                - ชิ้นเพิ่ม (หลังหักของเสีย ${totalDefectRate * 100}%): ${extraPartsFromSetupBeforeDefect} ÷ (1 + ${totalDefectRate * 100}%) = ${extraPiecesFromSetup} ชิ้น<br>
+                                - ชิ้นทั้งหมดที่ทำได้: ${targetOutput} + ${extraPiecesFromSetup} = ${newTotalPiecesWithSetup} ชิ้น</p>
+                                <p><strong>3. ลดของเสีย 50% (จาก ${(startupDefect * 100 + scrapRate * 100).toFixed(1)}% เหลือ ${((startupDefect * 100 + scrapRate * 100) * 0.5).toFixed(1)}%):</strong><br>
+                                - ใช้ Six Sigma และ SPC (Statistical Process Control) เพื่อควบคุมคุณภาพ<br>
+                                - เดิม: ชิ้นทั้งหมด ${totalParts} ชิ้น → จำนวนชิ้นที่ทำได้ ${totalParts} ÷ (1 + ${totalDefectRate * 100}%) = ${targetOutput} ชิ้น<br>
+                                - ใหม่: ชิ้นทั้งหมด ${totalParts} ชิ้น → จำนวนชิ้นที่ทำได้ ${totalParts} ÷ (1 + ${newTotalDefectRate * 100}%) = ${newTotalPiecesWithDefect} ชิ้น<br>
+                                - ชิ้นเพิ่ม: ${newTotalPiecesWithDefect} - ${targetOutput} = ${extraPiecesFromDefect} ชิ้น<br>
+                                - ชิ้นทั้งหมดที่ทำได้: ${newTotalPiecesWithDefect} ชิ้น</p>
+                            </div>
+                        </div>
+                    `);
+                    suggestions.en.push(`
+                        <div>
+                            <p><strong>Job ${partName}:</strong></p>
+                            <div class="lang-block-en ${currentLang === 'en' ? 'active' : ''}">
+                                <p><strong>1. Reduce Cycle Time by 20% (from ${cycleTime} sec to ${newCycleTimeOutput.toFixed(1)} sec):</strong><br>
+                                - Optimize mold cooling system (Mold Cooling Optimization)<br>
+                                - Original: Production Time ${totalCycleTime} sec → Total Pieces ${totalParts} pcs<br>
+                                - New: Production Time ${totalCycleTime} sec ÷ ${newCycleTimeOutput.toFixed(1)} sec/piece = ${newTotalPartsOutputWithCycle} pcs (with defects)<br>
+                                - New Pieces Possible: ${newTotalPartsOutputWithCycle} ÷ (1 + ${totalDefectRate * 100}%) = ${newTargetOutputWithCycle} pcs<br>
+                                - Extra Pieces: ${newTargetOutputWithCycle} - ${targetOutput} = ${extraPiecesFromCycle} pcs<br>
+                                - Total Pieces Possible: ${newTargetOutputWithCycle} pcs</p>
+                                <p><strong>2. Reduce Setup Time by 30% (from ${(setupTime / 60).toFixed(1)} min to ${(newSetupTimeOutput / 60).toFixed(1)} min):</strong><br>
+                                - Implement SMED (Single-Minute Exchange of Die) for faster mold changes<br>
+                                - New Setup Time: ${(newSetupTimeOutput / 60).toFixed(1)} min<br>
+                                - Extra Time Available: ${(extraTimeFromSetup / 60).toFixed(1)} min<br>
+                                - Extra Pieces (before defects): ${extraTimeFromSetup} sec ÷ ${cycleTime} sec/piece = ${extraPartsFromSetupBeforeDefect} pcs<br>
+                                - Extra Pieces (after defects ${totalDefectRate * 100}%): ${extraPartsFromSetupBeforeDefect} ÷ (1 + ${totalDefectRate * 100}%) = ${extraPiecesFromSetup} pcs<br>
+                                - Total Pieces Possible: ${targetOutput} + ${extraPiecesFromSetup} = ${newTotalPiecesWithSetup} pcs</p>
+                                <p><strong>3. Reduce Defects by 50% (from ${(startupDefect * 100 + scrapRate * 100).toFixed(1)}% to ${((startupDefect * 100 + scrapRate * 100) * 0.5).toFixed(1)}%):</strong><br>
+                                - Apply Six Sigma and SPC (Statistical Process Control) for quality control<br>
+                                - Original: Total Pieces ${totalParts} pcs → Pieces Possible ${totalParts} ÷ (1 + ${totalDefectRate * 100}%) = ${targetOutput} pcs<br>
+                                - New: Total Pieces ${totalParts} pcs → Pieces Possible ${totalParts} ÷ (1 + ${newTotalDefectRate * 100}%) = ${newTotalPiecesWithDefect} pcs<br>
+                                - Extra Pieces: ${newTotalPiecesWithDefect} - ${targetOutput} = ${extraPiecesFromDefect} pcs<br>
+                                - Total Pieces Possible: ${newTotalPiecesWithDefect} pcs</p>
+                            </div>
+                        </div>
+                    `);
+
+                    currentStartTime = new Date(fixedTime);
+                }
+            });
+
+            document.getElementById('resultTable').innerHTML = `
+                <div class="lang-block-th ${currentLang === 'th' ? 'active' : ''}">${resultTable.th.join('')}</div>
+                <div class="lang-block-en ${currentLang === 'en' ? 'active' : ''}">${resultTable.en.join('')}</div>
+            `;
+            document.getElementById('calculationSteps').innerHTML = `
+                <div class="lang-block-th ${currentLang === 'th' ? 'active' : ''}">${calculationSteps.th.map(step => `<p>${step}</p>`).join('')}</div>
+                <div class="lang-block-en ${currentLang === 'en' ? 'active' : ''}">${calculationSteps.en.map(step => `<p>${step}</p>`).join('')}</div>
+            `;
+            document.getElementById('suggestions').innerHTML = `
+                <div class="lang-block-th ${currentLang === 'th' ? 'active' : ''}">${suggestions.th.join('')}</div>
+                <div class="lang-block-en ${currentLang === 'en' ? 'active' : ''}">${suggestions.en.join('')}</div>
+            `;
+            document.getElementById('results').classList.remove('hidden');
+            updateStatus('done');
+        }
+
+        // Initialize
+        updateSelectOptions();
+    </script>
+</body>
+</html>
